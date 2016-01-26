@@ -153,6 +153,7 @@ typedef struct {
 	size_t *tileReadCountArray;
 	char *working_dir;
 	char *output;
+	char *apply_stats_out;
 	int read_length[3];
 	int calculate;
 	char *tileviz;
@@ -1315,6 +1316,9 @@ static void usage(int code)
 	fprintf(usagefp, "                 default: compress\n");
 	fprintf(usagefp, "      -f         mark filtered reads as QCFAIL\n");
 	fprintf(usagefp, "                 default: do not output filtered reads\n");
+	fprintf(usagefp, "      -l         apply_stats\n");
+	fprintf(usagefp, "                 apply status message output\n");
+	fprintf(usagefp, "                 default: stderr\n");
 	fprintf(usagefp, "\n");
 
 	exit(code);
@@ -1381,8 +1385,10 @@ void applyFilter(Settings *s)
 {
 	samfile_t *fp_input_bam;
 	samfile_t *fp_output_bam;
+	FILE *apply_stats_fd = NULL;
 	char out_mode[5] = "wb";
 	char *out_bam_file = NULL;
+	char *apply_stats_file = NULL;
 	bam_header_t *out_bam_header = NULL;
 	int ntiles;
 	size_t nreads = 0;
@@ -1401,6 +1407,7 @@ void applyFilter(Settings *s)
     ntiles = removeBadTiles(&hdr);
 
     out_bam_file = (NULL == s->output ? aprintf("/dev/stdout") : ((s->output)[0] == '/' ? aprintf("%s", s->output) : aprintf("%s/%s", s->working_dir, s->output)));
+    apply_stats_file = (NULL == s->apply_stats_out ? aprintf("/dev/stderr") : ((s->apply_stats_out)[0] == '/' ? aprintf("%s", s->apply_stats_out) : aprintf("%s/%s", s->working_dir, s->apply_stats_out)));
 
     s->region_size = hdr.region_size;
 	s->nregions    = hdr.nregions;
@@ -1440,8 +1447,12 @@ void applyFilter(Settings *s)
 	samclose(fp_input_bam);
 	samclose(fp_output_bam);
 
-	if (!s->quiet) display("Processed %8lu traces\n", nreads);
-	if (!s->quiet) display("%s %8lu traces\n", (s->qcfail ? "QC failed" : "Removed"), nfiltered);
+	if(NULL == (apply_stats_fd=fopen(apply_stats_file, "w"))) {
+		die("ERROR: failed to open apply status log %s\n", apply_stats_file);
+	}
+
+	if (!s->quiet) fprintf(apply_stats_fd, "Processed %8lu traces\n", nreads);
+	if (!s->quiet) fprintf(apply_stats_fd, "%s %8lu traces\n", (s->qcfail ? "QC failed" : "Removed"), nfiltered);
 
 	/* back to where we belong */
 	checked_chdir(s->working_dir);
@@ -1515,6 +1526,7 @@ int main(int argc, char **argv)
 	settings.tileArray = NULL;
 	settings.tileReadCountArray = NULL;
 	settings.output = NULL;
+	settings.apply_stats_out = NULL;
 	settings.in_bam_file = NULL;
 	settings.read_length[0] = 0;
 	settings.read_length[1] = 0;
@@ -1566,6 +1578,7 @@ int main(int argc, char **argv)
 			case 'b':	settings.region_insertion_threshold = atof(optarg); break;
 			case 'e':	settings.region_deletion_threshold = atof(optarg); break;
 			case 'q':	settings.quiet = 1;			break;
+			case 'l':	settings.apply_stats_out = optarg;		break;
 			case 'h':
 			case '?':	usage(0);					break;
 			default:	display("ERROR: Unknown option %c\n", c);
@@ -1619,6 +1632,7 @@ int main(int argc, char **argv)
 		if (settings.qcfail)    { strcat(cmd, " -f "); }
 		if (!settings.compress) { strcat(cmd, " -u "); }
 		if (settings.output)    { strcat(cmd, " -o "); strcat(cmd, settings.output); }
+		if (settings.apply_stats_out)    { strcat(cmd, " -l "); strcat(cmd, settings.apply_stats_out); }
 		if (settings.filter)    { strcat(cmd, " -F "); strcat(cmd, settings.filter); }
 		strcat(cmd, " ");
 		if (settings.in_bam_file) strcat(cmd, settings.in_bam_file);
